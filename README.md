@@ -15,4 +15,6 @@ This browser extension is designed to capture a selected portion of a webpage an
     2. **Pick Starting Section:** Click on any DIV on the webpage to define the capture start point.
     3. **Download ZIP:**  Receive an immediate ZIP file containing your carousel images.
 
-Developed by [chubes.net](https://chubes.net)
+Developed by Chris Huber
+
+[chubes.net](https://chubes.net)
