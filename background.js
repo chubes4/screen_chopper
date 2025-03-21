@@ -5,59 +5,70 @@ let currentPercentage = 100;
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'resizeAndPrepare') {
     currentPercentage = request.percentage || 100;
-
+  
     (async () => {
       let tab;
       const aspectRatio = request.aspectRatio;
-
+  
       try {
         [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         await chrome.debugger.attach({ tabId: tab.id }, '1.3');
-
-        const { result: { value: totalHeight } } = await chrome.debugger.sendCommand(
-          { tabId: tab.id }, 'Runtime.evaluate',
-          { expression: 'document.body.scrollHeight', returnByValue: true }
-        );
-
+  
+        const { result: { value: totalHeight } } =
+          await chrome.debugger.sendCommand({ tabId: tab.id }, 'Runtime.evaluate',
+            { expression: 'document.body.scrollHeight', returnByValue: true }
+          );
+  
         const adjustedHeight = Math.floor(totalHeight * (currentPercentage / 100));
-
+  
         await chrome.debugger.sendCommand({ tabId: tab.id }, 'Emulation.setDeviceMetricsOverride', {
           width: MOBILE_WIDTH,
           height: adjustedHeight,
-          deviceScaleFactor: DEVICE_SCALE_FACTOR, // explicitly use the same value
+          deviceScaleFactor: DEVICE_SCALE_FACTOR,
           mobile: true,
         });
-
+  
         await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: async (percentage) => {
             const delay = ms => new Promise(res => setTimeout(res, ms));
             const totalHeight = document.body.scrollHeight * (percentage / 100);
             const viewportHeight = window.innerHeight;
-        
+  
             for (let i = 0; i < totalHeight; i += viewportHeight / 2) {
               window.scrollTo(0, i);
-              await delay(150); // Explicitly optimized delay per scroll step
+              await delay(150);
             }
             window.scrollTo(0, 0);
-            await delay(500); // Explicitly optimized delay after scrolling
+            await delay(500);
           },
-          args: [currentPercentage]
+          args: [currentPercentage],
         });
-        
-
+  
         await new Promise(r => setTimeout(r, 1500));
-        await chrome.debugger.detach({ tabId: tab.id });
-
+  
+        // Detach debugger
+        if (await isDebuggerAttached(tab.id)) {
+          await chrome.debugger.detach({ tabId: tab.id });
+        }
+  
+        // ✅ Now inject content.js & jszip.min.js
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ["jszip.min.js", "content.js"]  // inject both
+        });
+  
+        // ✅ Finally, tell the injected content script to start
         await chrome.tabs.sendMessage(tab.id, {
           action: 'enableElementSelection',
           aspectRatio,
           percentage: currentPercentage
         });
-
+  
         sendResponse({ status: 'ready' });
+  
       } catch (error) {
-        if (tab && tab.id) {
+        if (tab && tab.id && await isDebuggerAttached(tab.id)) {
           await chrome.debugger.detach({ tabId: tab.id });
         }
         sendResponse({ status: 'error', message: error.message });
@@ -65,6 +76,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     })();
     return true;
   }
+  
 
   if (request.action === 'startCaptureFromOffset') {
     (async () => {
@@ -87,7 +99,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         await chrome.debugger.sendCommand({ tabId: tab.id }, 'Emulation.setDeviceMetricsOverride', {
           width: MOBILE_WIDTH,
           height: adjustedHeight,
-          deviceScaleFactor: DEVICE_SCALE_FACTOR, // explicitly use the same value
+          deviceScaleFactor: DEVICE_SCALE_FACTOR,
           mobile: true,
         });
 
@@ -98,19 +110,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           captureBeyondViewport: true
         });
 
-        await chrome.debugger.detach({ tabId: tab.id });
+        if (await isDebuggerAttached(tab.id)) {
+          await chrome.debugger.detach({ tabId: tab.id });
+        }
 
         chrome.tabs.sendMessage(tab.id, {
           action: 'processImage',
           imageData: screenshot.data,
           aspectRatio,
           title: tab.title,
-          startOffset: Math.floor(startOffset * DEVICE_SCALE_FACTOR), // explicitly matched to scale factor
+          startOffset: Math.floor(startOffset * DEVICE_SCALE_FACTOR),
           percentage: currentPercentage
         });
 
       } catch (error) {
-        if (tab && tab.id) {
+        if (tab && tab.id && await isDebuggerAttached(tab.id)) {
           await chrome.debugger.detach({ tabId: tab.id });
         }
         console.error('Capture error:', error);
@@ -125,3 +139,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
   }
 });
+
+/** ✅ Helper Function: Check if Debugger is Attached Before Detaching */
+async function isDebuggerAttached(tabId) {
+  const attachedTabs = await chrome.debugger.getTargets();
+  return attachedTabs.some(target => target.tabId === tabId);
+}
