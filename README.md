@@ -12,4 +12,6 @@ This extension allows you to select a specific section of a webpage and capture 
 - Automatically generates and downloads a ZIP file containing the carousel images.
 - Uses a mobile viewport during capture to ensure responsiveness.
 
-Developed by [chubes.net](https://chubes.net)
+Developed by Chris Huber
+
+[chubes.net](https://chubes.net)
