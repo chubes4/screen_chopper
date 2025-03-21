@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Screen Chopper</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <h3>Screen Chopper 🖼️✨</h3>
+
+  <label for="aspect-ratio">Aspect Ratio:</label>
+  <select id="aspect-ratio">
+    <option value="1:1">1:1 (Square)</option>
+    <option value="4:5">4:5 (Portrait)</option>
+    <option value="1.91:1">1.91:1 (Landscape)</option>
+    <option value="9:16">9:16 (Story)</option>
+  </select>
+
+  <label for="capture-percentage">Percentage of page to capture:</label>
+  <input type="range" id="capture-percentage" min="10" max="100" step="10" value="100">
+  <span id="percentage-display">100%</span>
+
+  <button id="capture-btn">Capture & Chop 📸</button>
+
+  <div id="notification" class="hidden"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
