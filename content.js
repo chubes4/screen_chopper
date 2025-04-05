@@ -1,15 +1,18 @@
+(() => {
+
+
 let currentHighlight;
 let highlightOverlay;
 let currentAspectRatio;
 
 chrome.runtime.onMessage.addListener((request) => {
   if (request.action === 'enableElementSelection') {
-    // 1. Store aspect ratio
+      // 1. Store aspect ratio
     currentAspectRatio = request.aspectRatio;
-
+ 
     // 2. Show a quick note telling user to pick the starting section
     showNotification('🔍 Click on the desired starting section.');
-
+ 
     // 3. Create the highlight overlay and attach mouse/click handlers
     createOverlay();
     document.addEventListener('mousemove', highlightElement, true);
@@ -18,66 +21,62 @@ chrome.runtime.onMessage.addListener((request) => {
 
   // Called AFTER the screenshot is taken in background.js
   if (request.action === 'processImage') {
+    // Now we expect startOffset to be the user-selected offset
     const { imageData, aspectRatio, title, startOffset, percentage } = request;
-
-    // We show "Processing images..." only after screenshot is done
+  
     showNotification('🛠 Processing images... Please wait.', false);
-
+  
     const img = new Image();
-    img.src = `data:image/png;base64,${imageData}`;
+    img.src = `data:image/jpeg;base64,${imageData}`; // full-page screenshot
     img.onload = async () => {
-      const scaleFactor = 4; // match background.js deviceScaleFactor
-      const scaledWidth = img.width;
-      const scaledHeight = img.height;
-
-      const chunkWidth = scaledWidth;
-      const chunkHeight = Math.floor(
-        chunkWidth * (aspectRatio.height / aspectRatio.width)
-      );
-
-      const canvas = document.createElement('canvas');
-      const maxHeight = scaledHeight - startOffset;
-      const captureHeight = Math.min(
-        Math.floor(maxHeight * (percentage / 100)),
-        maxHeight
-      );
-      canvas.width = chunkWidth;
-      canvas.height = captureHeight;
-
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, -startOffset);
-
-      const adjustedImgBlob = await new Promise((resolve) => canvas.toBlob(resolve));
-      const adjustedImg = new Image();
-      adjustedImg.src = URL.createObjectURL(adjustedImgBlob);
-
-      adjustedImg.onload = async () => {
-        const totalChunks = Math.ceil(captureHeight / chunkHeight);
+      // Calculate the cropped height from the selected starting point.
+      const captureHeight = Math.max(0, img.height - startOffset);
+  
+      // Create a canvas to crop the full screenshot starting at startOffset.
+      const croppedCanvas = document.createElement('canvas');
+      croppedCanvas.width = img.width;
+      croppedCanvas.height = captureHeight;
+      const croppedCtx = croppedCanvas.getContext('2d');
+      // Draw the image shifted upward by startOffset.
+      croppedCtx.drawImage(img, 0, 0);
+  
+      // Create an image from the cropped canvas.
+      const croppedImg = new Image();
+      croppedImg.src = croppedCanvas.toDataURL();
+      croppedImg.onload = async () => {
+        const scaledWidth = croppedImg.width;   // Width of the cropped image
+        const scaledHeight = croppedImg.height;   // Height of the cropped image
+  
+        const effectiveHeight = scaledHeight;
+  
+        // Calculate chunk dimensions based on the cropped image and desired aspect ratio.
+        const chunkWidth = scaledWidth;
+        const chunkHeight = Math.floor(chunkWidth * (aspectRatio.height / aspectRatio.width));
+        const totalChunks = Math.ceil(effectiveHeight / chunkHeight);
         const zip = new JSZip();
-
+  
         for (let i = 0; i < totalChunks; i++) {
           const partCanvas = document.createElement('canvas');
           partCanvas.width = chunkWidth;
           partCanvas.height =
-            i === totalChunks - 1 ? captureHeight - chunkHeight * i : chunkHeight;
-
+            i === totalChunks - 1 ? effectiveHeight - chunkHeight * i : chunkHeight;
           const partCtx = partCanvas.getContext('2d');
-          partCtx.drawImage(adjustedImg, 0, -chunkHeight * i);
-
-          const blob = await new Promise((resolve) => partCanvas.toBlob(resolve));
+          partCtx.drawImage(croppedImg, 0, -chunkHeight * i);
+          const blob = await new Promise((resolve) =>
+            partCanvas.toBlob(resolve)
+          );
           zip.file(
-            `${title.replace(/[^a-zA-Z0-9]/g, '_')}_carousel_${i + 1}.png`,
+            `${title.replace(/[^a-zA-Z0-9]/g, '_')}_carousel_${i + 1}.jpeg`,
             blob
           );
         }
-
+  
         const zipBlob = await zip.generateAsync({ type: 'blob' });
         const zipUrl = URL.createObjectURL(zipBlob);
-
-        // Remove "Processing..." notification before the download
-        removeNotification();
-
-        // Trigger the download
+  
+        removeNotification(); // Remove processing notification
+  
+        // Trigger the download.
         chrome.runtime.sendMessage({
           action: 'downloadZip',
           url: zipUrl,
@@ -86,6 +85,7 @@ chrome.runtime.onMessage.addListener((request) => {
       };
     };
   }
+  
 });
 
 /** Highlights whichever DIV user is hovering */
@@ -118,7 +118,7 @@ function selectElement(e) {
 
   const targetDiv = e.target.closest('div');
   const selectedStartOffset = targetDiv.getBoundingClientRect().top + window.scrollY;
-
+  const selectedRect = targetDiv.getBoundingClientRect();
   removeOverlay();     // Remove highlight overlay
   cleanupListeners();  // Remove mouse/click handlers
 
@@ -138,6 +138,7 @@ function selectElement(e) {
         action: 'startCaptureFromOffset',
         offset: selectedStartOffset,
         aspectRatio: currentAspectRatio,
+        clipRect: selectedRect, // Send the bounding rect
       });
     }, 300); // Enough time to ensure the notification disappears visually
   }, 500);
@@ -146,12 +147,14 @@ function selectElement(e) {
 /** Creates an absolutely positioned overlay that we can move/highlight. */
 function createOverlay() {
   highlightOverlay = document.createElement('div');
-  highlightOverlay.style.position = 'absolute';
-  highlightOverlay.style.backgroundColor = '#00aaff';
-  highlightOverlay.style.border = '2px solid #0088ff';
+  highlightOverlay.style.position = 'fixed'; /* Changed to fixed */
+  highlightOverlay.style.backgroundColor = 'rgba(0, 170, 255, 0.4)'; /* Slightly transparent background */
+  highlightOverlay.style.borderTop = '2px solid #0088ff'; /* Bottom border for visual clarity */
   highlightOverlay.style.pointerEvents = 'none';
   highlightOverlay.style.zIndex = '2147483647';
   highlightOverlay.style.display = 'none';
+  highlightOverlay.style.width = '100%'; /* Full width highlight */
+  highlightOverlay.style.left = '0';      /* Align to the left edge */
   highlightOverlay.style.transition = 'opacity 0.2s ease-in-out';
 
   document.body.appendChild(highlightOverlay);
@@ -208,3 +211,4 @@ function removeNotification() {
   const existing = document.getElementById('capture-notification');
   if (existing) existing.remove();
 }
+})();
